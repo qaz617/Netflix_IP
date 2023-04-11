@@ -40,7 +40,16 @@ jobs:
         rm -f ./NOTMP.txt
         echo `date +%Y/%m/%d\ %H:%M:%S\ %Z` >> ./update.txt
       
-        
+    - name: Commit
+      id: commit
+      continue-on-error: true
+      run: |
+        git config user.email "actions@github.com"
+        git config user.name "GitHub Actions"
+        git add .
+        git commit -m "Update `date +%Y/%m/%d\ %H:%M:%S\ %Z`" -a
+        git pull --rebase    
+    
     - name: Push changes
       uses: ad-m/github-push-action@master
       with:
