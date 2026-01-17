@@ -1,56 +1,100 @@
 #!/bin/bash
 # Gather Netflix and Amazon AWS IP ranges and put them into single file
 
-set -e
-if [ -e getflix.txt ] ; then rm getflix.txt ; fi
-# This command finds the ASNUMs owned by netflix
-wget -O nflix.zip "https://download.maxmind.com/app/geoip_download?edition_id=GeoLite2-Country-CSV&license_key=${LICENSE_KEY}&suffix=zip"
-for as in $(unzip -p nflix.zip `unzip -l nflix.zip |grep -e GeoLite2-ASN-Blocks-IPv4.csv | sed 's/^.\{30\}//g'` | grep -i netflix | cut -d"," -f2 | sort -u)
-    do
-     whois -h whois.radb.net -- '-i origin AS'$as | grep -Eo "([0-9.]+){4}/[0-9]+" | tee netflix_ranges.txt >>getflix.tmp
-     whois -h whois.radb.net -- '-i origin AS2906' | grep -Eo "([0-9.]+){4}/[0-9]+" | tee netflix_ranges.txt >>getflix.tmp
-     whois -h whois.radb.net -- '-i origin AS394406' | grep -Eo "([0-9.]+){4}/[0-9]+" | tee netflix_ranges.txt >>getflix.tmp
-     whois -h whois.radb.net -- '-i origin AS40027' | grep -Eo "([0-9.]+){4}/[0-9]+" | tee netflix_ranges.txt >>getflix.tmp
-     whois -h whois.radb.net -- '-i origin AS55095' | grep -Eo "([0-9.]+){4}/[0-9]+" | tee netflix_ranges.txt >>getflix.tmp
-done
+rm -f getflix.txt getflix.tmp NF_only.txt netflix_ranges.txt nflix.zip
 
-curl -O "https://raw.githubusercontent.com/LM-Firefly/Rules/master/Global-Services/Netflix.list"
-awk '{match($0, /[0-9]+\.[0-9]+\.[0-9]+\.*[0-9]+\/[0-9]+/); print substr($0, RSTART, RLENGTH)}' Netflix.list >>getflix.tmp
-rm Netflix.list
-curl -O "https://raw.githubusercontent.com/GeQ1an/Rules/master/QuantumultX/Filter/Optional/Netflix.list"
-awk '{match($0, /[0-9]+\.[0-9]+\.[0-9]+\.*[0-9]+\/[0-9]+/); print substr($0, RSTART, RLENGTH)}' Netflix.list >>getflix.tmp
-rm Netflix.list
-curl -O "https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/Ruleset/Netflix.list"
-awk '{match($0, /[0-9]+\.[0-9]+\.[0-9]+\.*[0-9]+\/[0-9]+/); print substr($0, RSTART, RLENGTH)}' Netflix.list >>getflix.tmp
-rm Netflix.list
-curl -O "https://raw.githubusercontent.com/dler-io/Rules/main/Surge/Surge%203/Provider/Media/Netflix.list"
-awk '{match($0, /[0-9]+\.[0-9]+\.[0-9]+\.*[0-9]+\/[0-9]+/); print substr($0, RSTART, RLENGTH)}' Netflix.list >>getflix.tmp
-rm Netflix.list
-curl -O "https://raw.githubusercontent.com/Masstone/Rules/master/Lists/Netflix.list"
-awk '{match($0, /[0-9]+\.[0-9]+\.[0-9]+\.*[0-9]+\/[0-9]+/); print substr($0, RSTART, RLENGTH)}' Netflix.list >>getflix.tmp
-rm Netflix.list
+echo "--> 1. Downloading MaxMind GeoLite2 ASN Database..."
 
+wget -O nflix.zip "https://download.maxmind.com/app/geoip_download?edition_id=GeoLite2-ASN-CSV&license_key=${LICENSE_KEY}&suffix=zip"
+
+echo "--> 2. Extracting Netflix ASNs..."
+
+unzip -o -j nflix.zip "*.csv" -d .
+
+
+ASN_FILE=$(find . -name "*GeoLite2-ASN-Blocks-IPv4.csv" | head -n 1)
+
+if [ -z "$ASN_FILE" ]; then
+    echo "Error: ASN CSV file not found in the zip!"
+    exit 1
+fi
+
+echo "Found ASN File: $ASN_FILE"
+
+
+grep -i "Netflix" "$ASN_FILE" | cut -d"," -f2 | sort -u > netflix_asn_list.txt
+
+
+echo "2906" >> netflix_asn_list.txt
+echo "394406" >> netflix_asn_list.txt
+echo "40027" >> netflix_asn_list.txt
+echo "55095" >> netflix_asn_list.txt
+
+
+sort -u netflix_asn_list.txt -o netflix_asn_list.txt
+
+echo "--> 3. Querying Whois for ASNs..."
+
+while read as_num; do
+
+    as_clean=$(echo $as_num | sed 's/[^0-9]//g')
+    if [ ! -z "$as_clean" ]; then
+        echo "Querying AS$as_clean..."
+        whois -h whois.radb.net -- "-i origin AS$as_clean" | grep -Eo "([0-9.]+){4}/[0-9]+" >> getflix.tmp || true
+    fi
+done < netflix_asn_list.txt
+
+echo "--> 4. Downloading Community Rules..."
+
+download_rule() {
+    url="$1"
+    echo "Downloading $url"
+    if curl -sSL -O "$url"; then
+        filename=$(basename "$url")
+        if [ -f "$filename" ]; then
+            awk '{match($0, /[0-9]+\.[0-9]+\.[0-9]+\.*[0-9]+\/[0-9]+/); if(RSTART) print substr($0, RSTART, RLENGTH)}' "$filename" >> getflix.tmp
+            rm -f "$filename"
+        fi
+    else
+        echo "Warning: Failed to download $url"
+    fi
+}
+
+download_rule "https://raw.githubusercontent.com/LM-Firefly/Rules/master/Global-Services/Netflix.list"
+download_rule "https://raw.githubusercontent.com/GeQ1an/Rules/master/QuantumultX/Filter/Optional/Netflix.list"
+download_rule "https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/Ruleset/Netflix.list"
+download_rule "https://raw.githubusercontent.com/dler-io/Rules/main/Surge/Surge%203/Provider/Media/Netflix.list"
+download_rule "https://raw.githubusercontent.com/Masstone/Rules/master/Lists/Netflix.list"
+
+echo "--> 5. Generating NF_only.txt (Aggregating)..."
 # Netflix only IP address ranges
-cat getflix.tmp | aggregate -q >NF_only.txt
+if [ -s getflix.tmp ]; then
+    cat getflix.tmp | aggregate -q > NF_only.txt
+else
+    echo "Warning: getflix.tmp is empty!"
+    touch NF_only.txt
+fi
 
+echo "--> 6. Processing AWS IP Ranges..."
 # Get the Amazon AWS ip range list
-curl -O https://ip-ranges.amazonaws.com/ip-ranges.json
-jq -r '[.prefixes | .[].ip_prefix] - [.prefixes[] | select(.service=="GLOBALACCELERATOR").ip_prefix] - [.prefixes[] | select(.service=="AMAZON").ip_prefix] - [.prefixes[] | select(.region=="cn-north-1").ip_prefix] - [.prefixes[] | select(.region=="cn-northwest-1").ip_prefix] | .[]' < ip-ranges.json >> getflix.tmp
-jq -r '[.prefixes | .[].ip_prefix] - [.prefixes[] | select(.service=="EC2").ip_prefix] - [.prefixes[] | select(.service=="AMAZON").ip_prefix] - [.prefixes[] | select(.region=="cn-north-1").ip_prefix] - [.prefixes[] | select(.region=="cn-northwest-1").ip_prefix] | .[]' < ip-ranges.json >> getflix.tmp
-jq -r '[.prefixes | .[].ip_prefix] - [.prefixes[] | select(.service=="CLOUDFRONT").ip_prefix] - [.prefixes[] | select(.service=="AMAZON").ip_prefix] - [.prefixes[] | select(.region=="cn-north-1").ip_prefix] - [.prefixes[] | select(.region=="cn-northwest-1").ip_prefix] | .[]' < ip-ranges.json >> getflix.tmp
+curl -sSL -O https://ip-ranges.amazonaws.com/ip-ranges.json
+if [ -f ip-ranges.json ]; then
 
-# Get the Akamai Netflix CDN ip range list
-#for as in $(unzip -p nflix.zip `unzip -l nflix.zip |grep -e GeoLite2-ASN-Blocks-IPv4.csv | sed 's/^.\{30\}//g'` | grep -i netflix | cut -d"," -f2 | sort -u)
-#    do
-#     whois -h whois.radb.net -- '-i origin AS20940' | grep -Eo "([0-9.]+){4}/[0-9]+" | tee netflix_ranges.txt >>getflix.tmp
-#done
+    jq -r '[.prefixes | .[].ip_prefix] - [.prefixes[] | select(.service=="GLOBALACCELERATOR").ip_prefix] - [.prefixes[] | select(.service=="AMAZON").ip_prefix] - [.prefixes[] | select(.region=="cn-north-1").ip_prefix] - [.prefixes[] | select(.region=="cn-northwest-1").ip_prefix] | .[]' < ip-ranges.json >> getflix.tmp || true
+    jq -r '[.prefixes | .[].ip_prefix] - [.prefixes[] | select(.service=="EC2").ip_prefix] - [.prefixes[] | select(.service=="AMAZON").ip_prefix] - [.prefixes[] | select(.region=="cn-north-1").ip_prefix] - [.prefixes[] | select(.region=="cn-northwest-1").ip_prefix] | .[]' < ip-ranges.json >> getflix.tmp || true
+    jq -r '[.prefixes | .[].ip_prefix] - [.prefixes[] | select(.service=="CLOUDFRONT").ip_prefix] - [.prefixes[] | select(.service=="AMAZON").ip_prefix] - [.prefixes[] | select(.region=="cn-north-1").ip_prefix] - [.prefixes[] | select(.region=="cn-northwest-1").ip_prefix] | .[]' < ip-ranges.json >> getflix.tmp || true
+fi
 
+echo "--> 7. Finalizing getflix.txt..."
 # unify both the IP address ranges
-cat getflix.tmp | aggregate -q >getflix.txt
-#tidy the tempfiles
-curl -s https://raw.githubusercontent.com/qaz617/Netflix_IP/refs/heads/master/NF_only.txt
-curl -s https://raw.githubusercontent.com/qaz617/Netflix_IP/refs/heads/master/getflix.txt
-rm nflix.zip
-rm getflix.tmp
-rm netflix_ranges.txt
-rm ip-ranges.json
+if [ -s getflix.tmp ]; then
+    cat getflix.tmp | aggregate -q > getflix.txt
+else
+    touch getflix.txt
+fi
+
+
+echo "--> Cleaning up..."
+rm -f nflix.zip getflix.tmp netflix_ranges.txt ip-ranges.json netflix_asn_list.txt *.csv
+
+echo "Done."
