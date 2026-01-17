@@ -29,7 +29,7 @@ rm Netflix.list
 curl -O "https://raw.githubusercontent.com/Masstone/Rules/master/Lists/Netflix.list"
 awk '{match($0, /[0-9]+\.[0-9]+\.[0-9]+\.*[0-9]+\/[0-9]+/); print substr($0, RSTART, RLENGTH)}' Netflix.list >>getflix.tmp
 rm Netflix.list
-curl -O "https://partnerhelp.netflixstudios.com/hc/en-us/articles/115000257627"
+curl -O "https://partnerhelp.netflixstudios.com/hc/en-us/articles/115000257627-What-are-Netflix-s-IP-Addresses-and-Port-Ranges"
 awk '{match($0, /[0-9]+\.[0-9]+\.[0-9]+\.*[0-9]+\/[0-9]+/); print substr($0, RSTART, RLENGTH)}' 115000257627 >>getflix.tmp
 grep -E -o "(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)" 115000257627 >>getflix.tmp
 rm 115000257627
